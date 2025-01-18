@@ -7,7 +7,7 @@ GOGET = $(GOCMD) get
 
 # Main package
 MAIN = ./src/main.go
-BINARY_NAME = dist/mote
+BINARY_NAME = dist/watchdog
 
 # Test package
 TEST_PACKAGE = ./...
@@ -35,7 +35,7 @@ dev:
 	./$(BINARY_NAME)
 
 # Build and run the binary
-all: deps build run
+all: deps build dev
 
 # Default target
 .DEFAULT_GOAL := all
