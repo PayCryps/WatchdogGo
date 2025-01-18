@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15.0-alpine
+    environment:
+      POSTGRES_USER: watchdogo
+      POSTGRES_PASSWORD: abc
+      POSTGRES_DB: watchdog
+    container_name: postgres
+    volumes:
+      - data:/var/lib/postgresql/data
+    restart: always
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: pg_isready --username=watchdogo --dbname=watchdog --quiet
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  data:
