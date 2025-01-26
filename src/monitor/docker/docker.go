@@ -3,13 +3,88 @@ package docker
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+	"time"
 
 	"github.com/PayCryps/WatchdogGo/src/utils"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/rs/zerolog"
 )
+
+func MonitorDocker(logger zerolog.Logger, dockerStop chan struct{}) {
+	logger.Info().Msg("Docker Monitor thread started")
+
+	HaltTime := os.Getenv("DOCKER_HALT_TIME")
+	if HaltTime == "" {
+		HaltTime = "10"
+	}
+	haltDuration, err := strconv.Atoi(HaltTime)
+	if err != nil {
+		logger.Error().Msgf("Error converting PROCESS_HALT_TIME to an integer: %s", err)
+		return
+	}
+	ticker := time.NewTicker(time.Second * time.Duration(haltDuration))
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			monitorDocker(logger)
+
+		case <-dockerStop:
+			logger.Info().Msg("Docker thread exiting")
+			return
+		}
+	}
+}
+
+func monitorDocker(logger zerolog.Logger) {
+	dockerCli := CreateDockerClient()
+
+	// Todo: Get all the containers required to monitor and check if they are running
+	desiredConfig := container.Config{Image: "postgres:15.0-alpine"}
+	desiredName := "/postgres"
+
+	containers := []ContainerDetails{}
+	containers = append(containers, ContainerDetails{Name: desiredName, Configs: desiredConfig})
+
+	statusList := IsContainerRunning(dockerCli, containers, logger)
+
+	for _, status := range statusList {
+		if !status.IsRunning {
+			if status.ContainerID != "" {
+				logger.Warn().Msgf("Restarting %s container", status.Name)
+				RestartContainer(dockerCli, status.ContainerID, logger)
+			} else {
+
+				DockerStart := os.Getenv("DOCKER_START")
+				if DockerStart == "FALSE" {
+					logger.Info().Msg("DOCKER_START is set to false, not starting container")
+					continue
+				}
+
+				// fetch the host configs from db based on the container name
+				network := "watchdog"
+				volume := mount.Mount{
+					Type:   mount.TypeVolume,
+					Source: "data",
+					Target: "/var/lib/postgresql/data",
+				}
+
+				hostConfig := container.HostConfig{
+					Mounts:      []mount.Mount{volume},
+					NetworkMode: container.NetworkMode(network),
+				}
+
+				CreateAndStartContainer(dockerCli, desiredConfig, hostConfig, desiredName, logger)
+			}
+		}
+	}
+}
 
 func CreateDockerClient() *client.Client {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -42,7 +117,7 @@ func IsContainerRunning(cli *client.Client, desiredContainers []ContainerDetails
 				if container.State == "running" {
 					containerStatusList = append(containerStatusList, ContainerStatus{IsRunning: true, ContainerID: container.ID, Name: containerDetails.Name})
 				} else {
-					logger.Error().Msg(fmt.Sprintf("Container %s is not running", containerDetails.Name))
+					logger.Error().Msgf("Container %s is not running", containerDetails.Name)
 					containerStatusList = append(containerStatusList, ContainerStatus{IsRunning: false, ContainerID: container.ID, Name: containerDetails.Name})
 				}
 				found = true

@@ -8,10 +8,9 @@ import (
 
 	"github.com/PayCryps/WatchdogGo/src/db"
 	"github.com/PayCryps/WatchdogGo/src/monitor/docker"
+	"github.com/PayCryps/WatchdogGo/src/monitor/process"
 	"github.com/PayCryps/WatchdogGo/src/server"
 	"github.com/PayCryps/WatchdogGo/src/utils"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
@@ -32,48 +31,17 @@ func monitorRoutine(logger zerolog.Logger, stop chan struct{}) {
 	ticker := time.NewTicker(time.Second * time.Duration(haltDuration))
 	defer ticker.Stop()
 
-	dockerCli := docker.CreateDockerClient()
+	select {
+	case <-ticker.C:
+		dockerStop := make(chan struct{})
+		processStop := make(chan struct{})
 
-	for {
-		select {
-		case <-ticker.C:
-			// Todo: Get all the containers required to monitor and check if they are running
-			desiredConfig := container.Config{Image: "postgres:15.0-alpine"}
-			desiredName := "/postgres"
+		go docker.MonitorDocker(logger, dockerStop)
+		go process.MonitorProcess(logger, processStop)
 
-			containers := []docker.ContainerDetails{}
-			containers = append(containers, docker.ContainerDetails{Name: desiredName, Configs: desiredConfig})
-
-			statusList := docker.IsContainerRunning(dockerCli, containers, logger)
-
-			for _, status := range statusList {
-				if !status.IsRunning {
-					if status.ContainerID != "" {
-						logger.Info().Msg(fmt.Sprintf("Restarting %s container", status.Name))
-						docker.RestartContainer(dockerCli, status.ContainerID, logger)
-					} else {
-						// fetch the host configs from db based on the container name
-						network := "watchdog"
-						volume := mount.Mount{
-							Type:   mount.TypeVolume,
-							Source: "data",
-							Target: "/var/lib/postgresql/data",
-						}
-
-						hostConfig := container.HostConfig{
-							Mounts:      []mount.Mount{volume},
-							NetworkMode: container.NetworkMode(network),
-						}
-
-						docker.CreateAndStartContainer(dockerCli, desiredConfig, hostConfig, desiredName, logger)
-					}
-				}
-			}
-
-		case <-stop:
-			logger.Info().Msg("Monitor thread exiting")
-			return
-		}
+	case <-stop:
+		logger.Info().Msg("Monitor thread exiting")
+		return
 	}
 }
 
