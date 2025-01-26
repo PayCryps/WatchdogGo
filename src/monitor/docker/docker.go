@@ -24,7 +24,7 @@ func MonitorDocker(logger zerolog.Logger, dockerStop chan struct{}) {
 	}
 	haltDuration, err := strconv.Atoi(HaltTime)
 	if err != nil {
-		logger.Error().Msgf("Error converting PROCESS_HALT_TIME to an integer:", err)
+		logger.Error().Msgf("Error converting PROCESS_HALT_TIME to an integer: %s", err)
 		return
 	}
 	ticker := time.NewTicker(time.Second * time.Duration(haltDuration))
